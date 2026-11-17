@@ -25,7 +25,7 @@ enum class MediaToolTab(val label: String) {
     AUDIO("Voice Note")
 }
 
-data class SelectedVideoInfo(
+data class SelectedMediaFile(
     val displayName: String,
     val mimeType: String,
     val bytes: ByteArray
@@ -49,8 +49,11 @@ class MediaLabViewModel(
     private val _selectedBitmap = MutableStateFlow<Bitmap?>(null)
     val selectedBitmap: StateFlow<Bitmap?> = _selectedBitmap.asStateFlow()
 
-    private val _selectedVideo = MutableStateFlow<SelectedVideoInfo?>(null)
-    val selectedVideo: StateFlow<SelectedVideoInfo?> = _selectedVideo.asStateFlow()
+    private val _selectedVideo = MutableStateFlow<SelectedMediaFile?>(null)
+    val selectedVideo: StateFlow<SelectedMediaFile?> = _selectedVideo.asStateFlow()
+
+    private val _selectedAudio = MutableStateFlow<SelectedMediaFile?>(null)
+    val selectedAudio: StateFlow<SelectedMediaFile?> = _selectedAudio.asStateFlow()
 
     private val _customPrompt = MutableStateFlow("")
     val customPrompt: StateFlow<String> = _customPrompt.asStateFlow()
@@ -106,7 +109,7 @@ class MediaLabViewModel(
         }
     }
 
-    fun setPickedVideo(videoInfo: SelectedVideoInfo?) {
+    fun setPickedVideo(videoInfo: SelectedMediaFile?) {
         _selectedVideo.value = videoInfo
         if (videoInfo != null) {
             analyzeCurrentVideo()
@@ -142,6 +145,13 @@ class MediaLabViewModel(
         }
     }
 
+    fun setPickedAudio(audioInfo: SelectedMediaFile?) {
+        _selectedAudio.value = audioInfo
+        if (audioInfo != null) {
+            transcribeAudioBytes(audioInfo.bytes, audioInfo.mimeType)
+        }
+    }
+
     fun startRecording() {
         try {
             audioRecorderHelper.startRecording()
@@ -172,7 +182,7 @@ class MediaLabViewModel(
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping audio recorder", e)
             _uiState.value = MediaLabUiState.Error(
-                e.localizedMessage ?: "Recording stopped unexpectedly. Please hold/record at least 1 second."
+                e.localizedMessage ?: "Recording stopped unexpectedly. Please record at least 1 second."
             )
             return
         }
@@ -182,13 +192,32 @@ class MediaLabViewModel(
             return
         }
 
+        _selectedAudio.value = SelectedMediaFile(
+            displayName = "Recorded Voice Clip",
+            mimeType = "audio/mp4",
+            bytes = audioBytes
+        )
+        transcribeAudioBytes(audioBytes, "audio/mp4")
+    }
+
+    fun reTranscribeCurrentAudio(overridePrompt: String? = null) {
+        val audio = _selectedAudio.value ?: return
+        transcribeAudioBytes(audio.bytes, audio.mimeType, overridePrompt)
+    }
+
+    private fun transcribeAudioBytes(
+        audioBytes: ByteArray,
+        mimeType: String,
+        overridePrompt: String? = null
+    ) {
+        val promptToUse = overridePrompt ?: _customPrompt.value
         viewModelScope.launch {
             _uiState.value = MediaLabUiState.Loading("Transcribing speech with Gemini 3.5 Transcribe...")
             try {
                 val result = geminiRepository.transcribeAudio(
                     audioBytes = audioBytes,
-                    mimeType = "audio/mp4",
-                    prompt = _customPrompt.value
+                    mimeType = mimeType,
+                    prompt = promptToUse
                 )
                 _uiState.value = MediaLabUiState.Success(
                     outputText = result,
@@ -206,10 +235,6 @@ class MediaLabViewModel(
                 )
             }
         }
-    }
-
-    fun clearOutput() {
-        _uiState.value = MediaLabUiState.Idle
     }
 
     override fun onCleared() {

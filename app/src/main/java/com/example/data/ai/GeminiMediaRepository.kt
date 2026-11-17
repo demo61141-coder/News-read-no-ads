@@ -1,7 +1,9 @@
 package com.example.data.ai
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.example.firebase.FirebaseInitStatus
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.GenerativeBackend
@@ -23,7 +25,9 @@ enum class BriefMode(val label: String) {
     TRANSLATE_EN("Translate English")
 }
 
-class GeminiMediaRepository {
+class GeminiMediaRepository(context: Context) {
+
+    private val appContext = context.applicationContext
 
     // Low-latency responses using gemini-3.1-flash-lite
     private val lowLatencyModel by lazy {
@@ -43,11 +47,21 @@ class GeminiMediaRepository {
             .generativeModel("gemini-3.5-transcribe")
     }
 
+    private fun requireFirebaseReady() {
+        if (!FirebaseInitStatus.ensureInitialized(appContext)) {
+            throw IllegalStateException(
+                FirebaseInitStatus.diagnosticMessage
+                    ?: "FirebaseApp is not initialized. Please ensure app/google-services.json is included in the build."
+            )
+        }
+    }
+
     fun streamArticleBrief(
         title: String,
         articleText: String,
         mode: BriefMode
     ): Flow<String> = flow {
+        requireFirebaseReady()
         val truncatedBody = articleText.take(14_000)
         val instruction = when (mode) {
             BriefMode.SUMMARY_BN ->
@@ -94,6 +108,7 @@ class GeminiMediaRepository {
     }
 
     suspend fun analyzeImage(bitmap: Bitmap, prompt: String): String {
+        requireFirebaseReady()
         val scaledBitmap = scaleBitmapForPayload(bitmap, maxDimension = 1600)
         val inputContent = content {
             image(scaledBitmap)
@@ -116,6 +131,7 @@ class GeminiMediaRepository {
     }
 
     suspend fun analyzeVideo(videoBytes: ByteArray, mimeType: String, prompt: String): String {
+        requireFirebaseReady()
         if (videoBytes.size > MAX_INLINE_BYTES) {
             throw IllegalArgumentException(
                 "Video file is ${(videoBytes.size / (1024 * 1024))} MB. Please pick a shorter clip under 18 MB for inline analysis."
@@ -142,9 +158,10 @@ class GeminiMediaRepository {
     }
 
     suspend fun transcribeAudio(audioBytes: ByteArray, mimeType: String, prompt: String): String {
+        requireFirebaseReady()
         if (audioBytes.size > MAX_INLINE_BYTES) {
             throw IllegalArgumentException(
-                "Audio recording exceeds the 18 MB inline limit. Please record a shorter clip."
+                "Audio file exceeds the 18 MB inline limit. Please use a shorter clip."
             )
         }
         val inputContent = content {
@@ -168,15 +185,23 @@ class GeminiMediaRepository {
     }
 
     private fun scaleBitmapForPayload(bitmap: Bitmap, maxDimension: Int): Bitmap {
-        val width = bitmap.width
-        val height = bitmap.height
-        if (width <= maxDimension && height <= maxDimension) return bitmap
+        val softwareBitmap = if (
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
+            bitmap.config == Bitmap.Config.HARDWARE
+        ) {
+            bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: bitmap
+        } else {
+            bitmap
+        }
+        val width = softwareBitmap.width
+        val height = softwareBitmap.height
+        if (width <= maxDimension && height <= maxDimension) return softwareBitmap
         val ratio = minOf(
             maxDimension.toFloat() / width.toFloat(),
             maxDimension.toFloat() / height.toFloat()
         )
         val targetW = (width * ratio).toInt().coerceAtLeast(1)
         val targetH = (height * ratio).toInt().coerceAtLeast(1)
-        return Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
+        return Bitmap.createScaledBitmap(softwareBitmap, targetW, targetH, true)
     }
 }

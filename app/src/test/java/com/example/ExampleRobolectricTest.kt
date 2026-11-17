@@ -2,7 +2,9 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.example.firebase.FirebaseInitStatus
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -12,10 +14,19 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class ExampleRobolectricTest {
 
-  @Test
-  fun `read string from context`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val appName = context.getString(R.string.app_name)
-    assertEquals("CleanRead", appName)
-  }
+    @Test
+    fun `read string from context`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val appName = context.getString(R.string.app_name)
+        assertEquals("CleanRead", appName)
+    }
+
+    @Test
+    fun `firebase app initializes from google services resources`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertTrue(
+            FirebaseInitStatus.diagnosticMessage ?: "FirebaseInitStatus failed",
+            FirebaseInitStatus.ensureInitialized(context)
+        )
+    }
 }

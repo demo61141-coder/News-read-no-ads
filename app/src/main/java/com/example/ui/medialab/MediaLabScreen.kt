@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Mic
@@ -70,6 +71,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -78,13 +80,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private const val MAX_VIDEO_READ_BYTES = 18L * 1024L * 1024L
+private const val MAX_INLINE_READ_BYTES = 18L * 1024L * 1024L
 
 @Composable
 fun MediaLabScreen(
     selectedTab: MediaToolTab,
     selectedBitmap: Bitmap?,
-    selectedVideo: SelectedVideoInfo?,
+    selectedVideo: SelectedMediaFile?,
+    selectedAudio: SelectedMediaFile?,
     customPrompt: String,
     isRecording: Boolean,
     recordingSeconds: Int,
@@ -93,8 +96,10 @@ fun MediaLabScreen(
     onPromptChange: (String) -> Unit,
     onPickedImage: (Bitmap?) -> Unit,
     onAnalyzeImage: (String?) -> Unit,
-    onPickedVideo: (SelectedVideoInfo?) -> Unit,
+    onPickedVideo: (SelectedMediaFile?) -> Unit,
     onAnalyzeVideo: (String?) -> Unit,
+    onPickedAudio: (SelectedMediaFile?) -> Unit,
+    onRetranscribeAudio: (String?) -> Unit,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
     onCopyOutput: (String, String) -> Unit,
@@ -127,9 +132,28 @@ fun MediaLabScreen(
         if (uri != null) {
             mediaLoadError = null
             scope.launch {
-                val result = withContext(Dispatchers.IO) { readVideoFromUri(context, uri) }
+                val result = withContext(Dispatchers.IO) {
+                    readMediaFileFromUri(context, uri, defaultMime = "video/mp4", defaultName = "Selected Video")
+                }
                 result.fold(
                     onSuccess = { info -> onPickedVideo(info) },
+                    onFailure = { err -> mediaLoadError = err.localizedMessage }
+                )
+            }
+        }
+    }
+
+    val audioPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            mediaLoadError = null
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    readMediaFileFromUri(context, uri, defaultMime = "audio/mpeg", defaultName = "Selected Audio")
+                }
+                result.fold(
+                    onSuccess = { info -> onPickedAudio(info) },
                     onFailure = { err -> mediaLoadError = err.localizedMessage }
                 )
             }
@@ -165,7 +189,7 @@ fun MediaLabScreen(
                         style = MaterialTheme.typography.headlineSmall
                     )
                     Text(
-                        text = "Scan news clippings & photos, analyze news videos, or transcribe voice notes.",
+                        text = "Scan news clippings & photos, analyze news videos, or upload/record audio for transcription.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -196,7 +220,7 @@ fun MediaLabScreen(
                                 },
                                 modifier = Modifier.testTag("media_tab_${tab.name.lowercase()}")
                             ) {
-                                Text(tab.label, maxLines = 1)
+                                Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -259,6 +283,7 @@ fun MediaLabScreen(
 
                     MediaToolTab.AUDIO -> {
                         AudioToolPanel(
+                            selectedAudio = selectedAudio,
                             isRecording = isRecording,
                             recordingSeconds = recordingSeconds,
                             micPermissionDenied = micPermissionDenied,
@@ -277,6 +302,13 @@ fun MediaLabScreen(
                                         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     }
                                 }
+                            },
+                            onUploadAudio = {
+                                audioPicker.launch(arrayOf("audio/*"))
+                            },
+                            onPresetPrompt = { preset ->
+                                onPromptChange(preset)
+                                onRetranscribeAudio(preset)
                             }
                         )
                     }
@@ -476,7 +508,7 @@ private fun PhotoToolPanel(
 
 @Composable
 private fun VideoToolPanel(
-    videoInfo: SelectedVideoInfo?,
+    videoInfo: SelectedMediaFile?,
     onPickVideo: () -> Unit,
     onPresetPrompt: (String) -> Unit
 ) {
@@ -553,10 +585,13 @@ private fun VideoToolPanel(
 
 @Composable
 private fun AudioToolPanel(
+    selectedAudio: SelectedMediaFile?,
     isRecording: Boolean,
     recordingSeconds: Int,
     micPermissionDenied: Boolean,
-    onToggleRecord: () -> Unit
+    onToggleRecord: () -> Unit,
+    onUploadAudio: () -> Unit,
+    onPresetPrompt: (String) -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(18.dp),
@@ -604,9 +639,42 @@ private fun AudioToolPanel(
                 )
             } else {
                 Text(
-                    text = "Tap to record voice or news clip",
+                    text = "Record a voice note or upload an audio file",
                     style = MaterialTheme.typography.titleMedium
                 )
+            }
+
+            if (selectedAudio != null && !isRecording) {
+                val mb = String.format("%.2f MB", selectedAudio.bytes.size / (1024.0 * 1024.0))
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AudioFile,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = selectedAudio.displayName,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${selectedAudio.mimeType} • $mb",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
             }
 
             if (micPermissionDenied) {
@@ -639,6 +707,39 @@ private fun AudioToolPanel(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(if (isRecording) "Stop & Transcribe" else "Start Recording")
             }
+
+            if (!isRecording) {
+                OutlinedButton(
+                    onClick = onUploadAudio,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .minimumInteractiveComponentSize()
+                        .testTag("upload_audio_button"),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(imageVector = Icons.Filled.AudioFile, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Upload Audio File (< 18 MB)")
+                }
+            }
+
+            if (selectedAudio != null && !isRecording) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AssistChip(
+                        onClick = { onPresetPrompt("Transcribe accurately in the spoken language.") },
+                        label = { Text("Exact Transcript") }
+                    )
+                    AssistChip(
+                        onClick = { onPresetPrompt("অডিওটি বাংলায় লিখে মূল পয়েন্টগুলো আলাদা করুন।") },
+                        label = { Text("বাংলা ট্রান্সক্রিপ্ট") }
+                    )
+                }
+            }
         }
     }
 }
@@ -648,6 +749,7 @@ private fun decodeBitmapFromUri(context: Context, uri: Uri): Bitmap? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
             ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 decoder.isMutableRequired = true
             }
         } else {
@@ -657,30 +759,41 @@ private fun decodeBitmapFromUri(context: Context, uri: Uri): Bitmap? {
     }.getOrNull()
 }
 
-private fun readVideoFromUri(context: Context, uri: Uri): Result<SelectedVideoInfo> {
+private fun readMediaFileFromUri(
+    context: Context,
+    uri: Uri,
+    defaultMime: String,
+    defaultName: String
+): Result<SelectedMediaFile> {
     return runCatching {
         val resolver = context.contentResolver
         val declaredSize = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
-        if (declaredSize > MAX_VIDEO_READ_BYTES) {
+        if (declaredSize > MAX_INLINE_READ_BYTES) {
             throw IllegalArgumentException(
-                "Selected video is ${declaredSize / (1024 * 1024)} MB. Please choose a clip under 18 MB."
+                "Selected file is ${declaredSize / (1024 * 1024)} MB. Please choose a clip under 18 MB."
             )
         }
 
         val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { cursor ->
                 if (cursor.moveToFirst()) cursor.getString(0) else null
-            } ?: "Selected Video"
+            } ?: defaultName
 
-        val mimeType = resolver.getType(uri) ?: "video/mp4"
+        val rawMime = resolver.getType(uri)
+        val mimeType = if (rawMime.isNullOrBlank() || rawMime == "application/octet-stream") {
+            defaultMime
+        } else {
+            rawMime
+        }
+
         val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: throw IllegalStateException("Unable to read selected video.")
+            ?: throw IllegalStateException("Unable to read selected file.")
 
-        if (bytes.size.toLong() > MAX_VIDEO_READ_BYTES) {
+        if (bytes.size.toLong() > MAX_INLINE_READ_BYTES) {
             throw IllegalArgumentException(
-                "Selected video is ${bytes.size / (1024 * 1024)} MB. Please choose a clip under 18 MB."
+                "Selected file is ${bytes.size / (1024 * 1024)} MB. Please choose a clip under 18 MB."
             )
         }
-        SelectedVideoInfo(displayName = displayName, mimeType = mimeType, bytes = bytes)
+        SelectedMediaFile(displayName = displayName, mimeType = mimeType, bytes = bytes)
     }
 }

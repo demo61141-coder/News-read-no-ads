@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
         val database = CleanReadDatabase.getInstance(applicationContext)
         val articleRepository = ArticleRepository(database.articleDao())
         val preferencesRepository = ReaderPreferencesRepository(applicationContext)
-        val geminiRepository = GeminiMediaRepository()
+        val geminiRepository = GeminiMediaRepository(applicationContext)
         val audioRecorderHelper = AudioRecorderHelper(applicationContext)
 
         setContent {
@@ -305,6 +305,7 @@ fun CleanReadApp(
                         val selectedTab by mediaLabViewModel.selectedTab.collectAsStateWithLifecycle()
                         val selectedBitmap by mediaLabViewModel.selectedBitmap.collectAsStateWithLifecycle()
                         val selectedVideo by mediaLabViewModel.selectedVideo.collectAsStateWithLifecycle()
+                        val selectedAudio by mediaLabViewModel.selectedAudio.collectAsStateWithLifecycle()
                         val customPrompt by mediaLabViewModel.customPrompt.collectAsStateWithLifecycle()
                         val isRecording by mediaLabViewModel.isRecording.collectAsStateWithLifecycle()
                         val recordingSeconds by mediaLabViewModel.recordingSeconds.collectAsStateWithLifecycle()
@@ -314,6 +315,7 @@ fun CleanReadApp(
                             selectedTab = selectedTab,
                             selectedBitmap = selectedBitmap,
                             selectedVideo = selectedVideo,
+                            selectedAudio = selectedAudio,
                             customPrompt = customPrompt,
                             isRecording = isRecording,
                             recordingSeconds = recordingSeconds,
@@ -324,6 +326,8 @@ fun CleanReadApp(
                             onAnalyzeImage = mediaLabViewModel::analyzeCurrentImage,
                             onPickedVideo = mediaLabViewModel::setPickedVideo,
                             onAnalyzeVideo = mediaLabViewModel::analyzeCurrentVideo,
+                            onPickedAudio = mediaLabViewModel::setPickedAudio,
+                            onRetranscribeAudio = mediaLabViewModel::reTranscribeCurrentAudio,
                             onStartRecording = mediaLabViewModel::startRecording,
                             onStopRecording = mediaLabViewModel::stopRecordingAndTranscribe,
                             onCopyOutput = ::copyToClipboard,
