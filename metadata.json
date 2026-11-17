@@ -1,0 +1,6 @@
+{
+  "name": "CleanRead",
+  "description": "Ad-free news reader mode with instant text copy, offline article library, and Gemini multimodal media tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
